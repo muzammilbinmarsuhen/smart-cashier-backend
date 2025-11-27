@@ -12,12 +12,9 @@ use Illuminate\Support\Facades\Validator;
 class TransactionController extends Controller
 {
     // GET /api/transactions
-    public function index(Request $request)
+    public function index()
     {
-        $transactions = Transaction::with('items.product')
-            ->where('user_id', $request->user()->id)
-            ->orderBy('transaction_date', 'desc')
-            ->get();
+        $transactions = Transaction::with('items.product', 'user')->orderBy('created_at', 'desc')->get();
 
         return response()->json([
             'message' => 'Daftar transaksi',
@@ -25,14 +22,99 @@ class TransactionController extends Controller
         ]);
     }
 
-    // GET /api/transactions/{id}
-    public function show(Request $request, $id)
+    // POST /api/transactions
+    public function store(Request $request)
     {
-        $transaction = Transaction::with('items.product')
-            ->where('user_id', $request->user()->id)
-            ->find($id);
+        $validator = Validator::make($request->all(), [
+            'items'       => 'required|array|min:1',
+            'items.*.product_id' => 'required|exists:products,id',
+            'items.*.qty' => 'required|integer|min:1',
+            'paid_amount' => 'required|numeric|min:0',
+        ]);
 
-        if (! $transaction) {
+        if ($validator->fails()) {
+            return response()->json([
+                'message' => 'Validasi gagal',
+                'errors'  => $validator->errors(),
+            ], 422);
+        }
+
+        $totalAmount = 0;
+        $itemsData = [];
+
+        foreach ($request->items as $item) {
+            $product = Product::find($item['product_id']);
+            if ($product->stock < $item['qty']) {
+                return response()->json([
+                    'message' => 'Stok produk ' . $product->name . ' tidak cukup',
+                ], 400);
+            }
+            $subtotal = $product->price * $item['qty'];
+            $totalAmount += $subtotal;
+            $itemsData[] = [
+                'product_id' => $item['product_id'],
+                'qty' => $item['qty'],
+                'price' => $product->price,
+                'subtotal' => $subtotal,
+            ];
+        }
+
+        if ($request->paid_amount < $totalAmount) {
+            return response()->json([
+                'message' => 'Uang dibayar kurang dari total',
+            ], 400);
+        }
+
+        DB::beginTransaction();
+        try {
+            // Generate invoice number
+            $invoiceNumber = 'TRX-' . date('Ymd') . '-' . str_pad(Transaction::count() + 1, 4, '0', STR_PAD_LEFT);
+
+            $transaction = Transaction::create([
+                'user_id' => auth()->id(),
+                'invoice_number' => $invoiceNumber,
+                'total_amount' => $totalAmount,
+                'paid_amount' => $request->paid_amount,
+                'change_amount' => $request->paid_amount - $totalAmount,
+            ]);
+
+            foreach ($itemsData as $itemData) {
+                TransactionItem::create([
+                    'transaction_id' => $transaction->id,
+                    'product_id' => $itemData['product_id'],
+                    'qty' => $itemData['qty'],
+                    'price' => $itemData['price'],
+                    'subtotal' => $itemData['subtotal'],
+                ]);
+
+                // Update stock
+                $product = Product::find($itemData['product_id']);
+                $product->decrement('stock', $itemData['qty']);
+            }
+
+            DB::commit();
+
+            $transaction->load('items.product');
+
+            return response()->json([
+                'message' => 'Transaksi berhasil dibuat',
+                'data'    => $transaction,
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // GET /api/transactions/{id}
+    public function show($id)
+    {
+        $transaction = Transaction::with('items.product', 'user')->find($id);
+
+        if (!$transaction) {
             return response()->json([
                 'message' => 'Transaksi tidak ditemukan',
             ], 404);
@@ -44,93 +126,45 @@ class TransactionController extends Controller
         ]);
     }
 
-    // POST /api/transactions  (CHECKOUT)
-    public function store(Request $request)
+    // PUT /api/transactions/{id} - maybe not needed for cashier, but for completeness
+    public function update(Request $request, $id)
     {
-        $validator = Validator::make($request->all(), [
-            'items'                => 'required|array|min:1',
-            'items.*.product_id'   => 'required|exists:products,id',
-            'items.*.qty'          => 'required|integer|min:1',
-            'paid_amount'          => 'required|numeric|min:0',
-        ]);
+        // Implement if needed, but for now, perhaps not allow updates
+        return response()->json([
+            'message' => 'Update transaksi tidak diizinkan',
+        ], 405);
+    }
 
-        if ($validator->fails()) {
+    // DELETE /api/transactions/{id}
+    public function destroy($id)
+    {
+        $transaction = Transaction::with('items')->find($id);
+
+        if (!$transaction) {
             return response()->json([
-                'message' => 'Validasi gagal',
-                'errors'  => $validator->errors(),
-            ], 422);
+                'message' => 'Transaksi tidak ditemukan',
+            ], 404);
         }
 
-        $user = $request->user();
-        $itemsInput = $request->items;
-
-        return DB::transaction(function () use ($user, $itemsInput, $request) {
-            $total = 0;
-            $detailItems = [];
-
-            // Hitung total & cek stok
-            foreach ($itemsInput as $item) {
-                $product = Product::find($item['product_id']);
-
-                if ($product->stock < $item['qty']) {
-                    abort(response()->json([
-                        'message' => 'Stok tidak cukup untuk produk: ' . $product->name,
-                    ], 400));
-                }
-
-                $price    = $product->price;
-                $subtotal = $price * $item['qty'];
-                $total   += $subtotal;
-
-                $detailItems[] = [
-                    'product'  => $product,
-                    'qty'      => $item['qty'],
-                    'price'    => $price,
-                    'subtotal' => $subtotal,
-                ];
+        DB::beginTransaction();
+        try {
+            // Restore stock
+            foreach ($transaction->items as $item) {
+                $item->product->increment('stock', $item->qty);
             }
 
-            $paidAmount   = $request->paid_amount;
-            $changeAmount = $paidAmount - $total;
+            $transaction->delete();
 
-            if ($changeAmount < 0) {
-                abort(response()->json([
-                    'message' => 'Uang bayar kurang. Total: ' . $total,
-                ], 400));
-            }
-
-            // Generate nomor nota sederhana
-            $invoice = 'TRX-' . now()->format('Ymd-His') . '-' . $user->id;
-
-            // Simpan transaksi
-            $transaction = Transaction::create([
-                'user_id'          => $user->id,
-                'invoice_number'   => $invoice,
-                'total_amount'     => $total,
-                'paid_amount'      => $paidAmount,
-                'change_amount'    => $changeAmount,
-                'transaction_date' => now(),
-            ]);
-
-            // Simpan item dan kurangi stok
-            foreach ($detailItems as $item) {
-                TransactionItem::create([
-                    'transaction_id' => $transaction->id,
-                    'product_id'     => $item['product']->id,
-                    'qty'            => $item['qty'],
-                    'price'          => $item['price'],
-                    'subtotal'       => $item['subtotal'],
-                ]);
-
-                $item['product']->decrement('stock', $item['qty']);
-            }
-
-            $transaction->load('items.product');
+            DB::commit();
 
             return response()->json([
-                'message' => 'Transaksi berhasil dibuat',
-                'data'    => $transaction,
-            ], 201);
-        });
+                'message' => 'Transaksi berhasil dihapus',
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'message' => 'Terjadi kesalahan saat menghapus transaksi: ' . $e->getMessage(),
+            ], 500);
+        }
     }
 }
