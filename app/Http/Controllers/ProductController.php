@@ -14,8 +14,9 @@ class ProductController extends Controller
         $products = Product::orderBy('created_at', 'desc')->get();
 
         return response()->json([
-            'message'  => 'Daftar produk',
-            'data'     => $products,
+            'success' => true,
+            'message' => 'Daftar produk',
+            'data'    => $products,
         ]);
     }
 
@@ -32,6 +33,7 @@ class ProductController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
+                'success' => false,
                 'message' => 'Validasi gagal',
                 'errors'  => $validator->errors(),
             ], 422);
@@ -46,6 +48,7 @@ class ProductController extends Controller
         ]);
 
         return response()->json([
+            'success' => true,
             'message' => 'Produk berhasil ditambahkan',
             'data'    => $product,
         ], 201);
@@ -58,11 +61,13 @@ class ProductController extends Controller
 
         if (! $product) {
             return response()->json([
+                'success' => false,
                 'message' => 'Produk tidak ditemukan',
             ], 404);
         }
 
         return response()->json([
+            'success' => true,
             'message' => 'Detail produk',
             'data'    => $product,
         ]);
@@ -75,6 +80,7 @@ class ProductController extends Controller
 
         if (! $product) {
             return response()->json([
+                'success' => false,
                 'message' => 'Produk tidak ditemukan',
             ], 404);
         }
@@ -89,6 +95,7 @@ class ProductController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
+                'success' => false,
                 'message' => 'Validasi gagal',
                 'errors'  => $validator->errors(),
             ], 422);
@@ -97,6 +104,7 @@ class ProductController extends Controller
         $product->update($validator->validated());
 
         return response()->json([
+            'success' => true,
             'message' => 'Produk berhasil diupdate',
             'data'    => $product,
         ]);
@@ -109,6 +117,7 @@ class ProductController extends Controller
 
         if (! $product) {
             return response()->json([
+                'success' => false,
                 'message' => 'Produk tidak ditemukan',
             ], 404);
         }
@@ -116,6 +125,7 @@ class ProductController extends Controller
         $product->delete();
 
         return response()->json([
+            'success' => true,
             'message' => 'Produk berhasil dihapus',
         ]);
     }

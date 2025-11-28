@@ -29,6 +29,7 @@ class AuthController extends Controller
         $token = $user->createToken('api_token')->plainTextToken;
 
         return response()->json([
+            'success' => true,
             'message' => 'Register berhasil',
             'user'    => $user,
             'token'   => $token,
@@ -47,6 +48,7 @@ class AuthController extends Controller
 
         if (! $user || ! Hash::check($data['password'], $user->password)) {
             return response()->json([
+                'success' => false,
                 'message' => 'Email atau password salah',
             ], 401);
         }
@@ -55,6 +57,7 @@ class AuthController extends Controller
         $token = $user->createToken('api_token')->plainTextToken;
 
         return response()->json([
+            'success' => true,
             'message' => 'Login berhasil',
             'user'    => $user,
             'token'   => $token,
@@ -64,15 +67,20 @@ class AuthController extends Controller
     // ME: data user yang sedang login
     public function me(Request $request)
     {
-        return response()->json($request->user());
+        return response()->json([
+            'success' => true,
+            'message' => 'Data user',
+            'data'    => $request->user(),
+        ]);
     }
 
-    // LOGOUT: hapus semua token user
+    // LOGOUT: hapus token yang sedang dipakai
     public function logout(Request $request)
     {
-        $request->user()->tokens()->delete();
+        $request->user()->currentAccessToken()->delete();
 
         return response()->json([
+            'success' => true,
             'message' => 'Logout berhasil',
         ]);
     }

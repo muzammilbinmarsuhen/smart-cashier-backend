@@ -17,6 +17,7 @@ class TransactionController extends Controller
         $transactions = Transaction::with('items.product', 'user')->orderBy('created_at', 'desc')->get();
 
         return response()->json([
+            'success' => true,
             'message' => 'Daftar transaksi',
             'data'    => $transactions,
         ]);
@@ -34,6 +35,7 @@ class TransactionController extends Controller
 
         if ($validator->fails()) {
             return response()->json([
+                'success' => false,
                 'message' => 'Validasi gagal',
                 'errors'  => $validator->errors(),
             ], 422);
@@ -46,6 +48,7 @@ class TransactionController extends Controller
             $product = Product::find($item['product_id']);
             if ($product->stock < $item['qty']) {
                 return response()->json([
+                    'success' => false,
                     'message' => 'Stok produk ' . $product->name . ' tidak cukup',
                 ], 400);
             }
@@ -61,6 +64,7 @@ class TransactionController extends Controller
 
         if ($request->paid_amount < $totalAmount) {
             return response()->json([
+                'success' => false,
                 'message' => 'Uang dibayar kurang dari total',
             ], 400);
         }
@@ -97,6 +101,7 @@ class TransactionController extends Controller
             $transaction->load('items.product');
 
             return response()->json([
+                'success' => true,
                 'message' => 'Transaksi berhasil dibuat',
                 'data'    => $transaction,
             ], 201);
@@ -104,6 +109,7 @@ class TransactionController extends Controller
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
+                'success' => false,
                 'message' => 'Terjadi kesalahan: ' . $e->getMessage(),
             ], 500);
         }
@@ -116,11 +122,13 @@ class TransactionController extends Controller
 
         if (!$transaction) {
             return response()->json([
+                'success' => false,
                 'message' => 'Transaksi tidak ditemukan',
             ], 404);
         }
 
         return response()->json([
+            'success' => true,
             'message' => 'Detail transaksi',
             'data'    => $transaction,
         ]);
@@ -131,6 +139,7 @@ class TransactionController extends Controller
     {
         // Implement if needed, but for now, perhaps not allow updates
         return response()->json([
+            'success' => false,
             'message' => 'Update transaksi tidak diizinkan',
         ], 405);
     }
@@ -142,6 +151,7 @@ class TransactionController extends Controller
 
         if (!$transaction) {
             return response()->json([
+                'success' => false,
                 'message' => 'Transaksi tidak ditemukan',
             ], 404);
         }
@@ -158,11 +168,13 @@ class TransactionController extends Controller
             DB::commit();
 
             return response()->json([
+                'success' => true,
                 'message' => 'Transaksi berhasil dihapus',
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
+                'success' => false,
                 'message' => 'Terjadi kesalahan saat menghapus transaksi: ' . $e->getMessage(),
             ], 500);
         }
